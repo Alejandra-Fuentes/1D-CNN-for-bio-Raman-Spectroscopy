@@ -1,0 +1,604 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Jul 11 17:58:59 2022
+
+@author: Alejandra Fuentes
+"""
+
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jul  5 00:51:12 2022
+
+@author: Alejandra Fuentes
+"""
+
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jun 28 16:44:48 2022
+
+@author: Alejandra Fuentes
+"""
+
+# -*- coding: utf-8 -*-
+"""
+Created on Sun May 22 21:58:47 2022
+
+@author: Alejandra Fuentes
+"""
+
+# -*- coding: utf-8 -*-
+"""
+Created on Sat May 21 21:46:09 2022
+
+@author: Alejandra Fuentes
+"""
+
+""
+
+
+#Importing numpy, tensorflow, keras and other useful libraries  
+import tensorflow as tf
+from tensorflow import keras
+from keras.models import Sequential
+from keras.models import Model
+from keras.layers import Dense, Dropout, Flatten, Conv2D, ReLU,MaxPooling2D, Normalization, Conv1D, InputLayer, Activation, BatchNormalization, ELU, MaxPooling1D, Normalization,GlobalAveragePooling1D,AveragePooling1D,LeakyReLU,PReLU,GlobalMaxPooling1D
+from keras.constraints import NonNeg
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder,MinMaxScaler
+from numpy import mean,std
+from sklearn.metrics import confusion_matrix
+
+data = pd.read_excel(r'C:\Users\Alejandra\OneDrive - UBC\New folder\AElungandcells-revisited\gradcamforcells\CellspectraFourlineszscore.xlsx',header=None)
+#data = pd.read_excel(r'C:\Users\Alejandra Fuentes\OneDrive - The University Of British Columbia\New folder\AElungandcells-revisited\gradcamforcells\CellspectraFourlinesminmax.xlsx',header=None)
+
+labels = pd.read_excel(r'C:\Users\Alejandra\OneDrive - UBC\New folder\AElungandcells-revisited\gradcamforcells\CellspectraLabelsCNN2.xlsx',header=None) #PlosOneAnalystLabelsnAppSpec PlosOneAnalystzscorerevisited
+
+
+
+
+#Convert the category label names (e.g, radiosensitive versus radioresistant) to vectors for binary classification
+#our classes will be: [1 0] and [0 1]
+le = LabelEncoder()
+le.fit(labels)
+classes = le.classes_
+print(le.classes_)
+num_classes = len(classes)
+y_data_raw = np.copy(labels)
+y_data = le.transform(y_data_raw)
+y_data = tf.keras.utils.to_categorical(y_data)
+
+
+#Random number generator: set seed for reproducible results
+seedy=2700
+np.random.seed(seedy)
+tf.random.set_seed(seedy) 
+
+
+#Splitting my data and their labels into randomly defined training and testing sets
+# For now, 20% of the total data is set for testing 
+from sklearn.model_selection import train_test_split
+
+X_train, X_test, y_train, y_test = train_test_split(data, y_data, test_size=0.2)
+num_classes = 2
+#X_test.to_excel('testsetidxplosseed1400ep35.xlsx')
+# Convert the 2D data matrix  to 3D array so that input is acceptable to the CNN. 
+#From num of spectra x num of points matrix to a num of spectra x num of points x 1  3-Dmatrix (only one channel)
+X_train = np.expand_dims(X_train, -1)
+X_test = np.expand_dims(X_test, -1)
+Alldata=np.expand_dims(data,-1)
+
+
+
+#Define CNN number and size of filters, dropout ratio, number of neurons in first FC layer, minibatch size.
+#best trial so far is using a 10FC layer with ELU activation
+numfiltersly1=32
+filtersizely1=8
+numfiltersly2=64
+filtersizely2=filtersizely1
+stridecnn=2#320 is og
+FCsize=5#20 was working #10 is working #325 working but same weights  #18 working #12 working  
+DropRatio=0.2 #is it in percent or in ratio? #20 worked for the other set
+minibatchsize=50 #40 working ok, 50 as well
+numfiltersly3=32
+
+#even numbers - > odd dimensional kernel maxpooling good-> strided is better with even dimensional kernel stride 2, kernel 4,2,
+#filter size, build bottom up  582x1-dilated convolution-adding dilation
+#stride even, kernel even -> 2,4,8,16 (exponents of two)  2,4,8-> dilaton factors -2,
+#4 8 16 -next trial? -> see if parameters change while training with more data -the full data set 
+#Define the CNN architecture and Training options - 2ConvLayer CNN worked the best in my pilot study
+#Adam was the fastest optimizer #False
+#Cross entropy loss for classification
+model=keras.models.Sequential()
+model.add(Conv1D(filters=numfiltersly1, kernel_size=filtersizely1,strides=2,dilation_rate=1,use_bias=False,activation=None,input_shape=(582,1),padding='same')) #padding
+model.add(BatchNormalization())
+#MaxPooling1D(pool_size=2, strides=2)
+#model.add(ReLU())
+#model.add(Conv1D(filters=numfiltersly1, kernel_size=filtersizely2,strides=2,dilation_rate=1,use_bias=False,activation=None,padding='same')) 
+#model.add(BatchNormalization())
+#MaxPooling1D(pool_size=2, strides=2)
+model.add(ReLU())
+model.add(Conv1D(filters=numfiltersly2, kernel_size=filtersizely2,strides=3,dilation_rate=1,use_bias=False,activation=None,padding='same')) 
+model.add(BatchNormalization())
+#MaxPooling1D(pool_size=2, strides=2)
+model.add(ReLU())
+#model.add(GlobalAveragePooling1D())
+model.add(keras.layers.Flatten())
+#model.add(keras.layers.Dense(FCsize))
+#model.add(BatchNormalization())
+#model.add(ELU()) (alpha=1.0, **kwargs)
+model.add(Dropout(DropRatio))
+model.add(keras.layers.Dense(num_classes,use_bias=True,activation='softmax'))
+#trainableFalse freezes biases and weights ,trainable=False
+#for layer in model.layers:
+       # layer.trainable=True
+opt = keras.optimizers.Adam(learning_rate=0.0001,beta_1=0.9,beta_2=0.999,epsilon=1e-08,amsgrad=True)
+model.compile(optimizer=opt,loss='categorical_crossentropy',metrics=['accuracy'])
+history = model.fit(X_train,y_train,batch_size=minibatchsize,epochs=25,validation_split=0.125) #80 still good 0.125
+#will give me the number of parameters in my model!
+model.summary() 
+
+
+# Plot training progress vs epochs 
+print(history.history.keys())
+plt.plot(history.history['accuracy'])
+plt.plot(history.history['val_accuracy'])
+plt.title('model accuracy')
+plt.ylabel('accuracy')
+plt.xlabel('epoch')
+plt.legend(['Train', 'Validation'], loc='upper left')
+plt.show()
+
+#Evaluate the CNN with the testing set: I get the test accuracy and also the class scores for each test sample
+test_loss,test_accuracy=model.evaluate(X_test,y_test)
+Testclassscore=model.predict(X_test)
+
+#Confusion matrix from which we can ger
+y_prediction = model.predict(X_test)
+y_prediction = np.argmax (y_prediction, axis = 1)
+Y_test=np.argmax(y_test, axis=1)
+result = confusion_matrix(Y_test, y_prediction , normalize='pred')
+print(result)
+
+def relu(x):
+    return(np.maximum(0, x))
+
+
+def grad_cam(layer_name, data, model):
+    
+    grad_model = tf.keras.models.Model([model.inputs], [model.get_layer(layer_name).output, model.output])
+    
+    last_conv_layer_output, preds = grad_model(data)
+
+    with tf.GradientTape() as tape:
+        last_conv_layer_output, preds = grad_model(data)
+        #print(last_conv_layer_output.shape)
+        #print(preds.shape) 
+        #print(preds) 
+        pred_index = tf.argmax(preds[0])
+        class_channel = preds[:, pred_index]
+        #print(pred_index)
+        #print(class_channel)
+    
+    grads = tape.gradient(class_channel, last_conv_layer_output)
+    #print(grads.shape)
+    last_conv_layer_output = last_conv_layer_output[0]
+    ##print(last_conv_layer_output.shape)
+    pooled_grads = tf.reduce_mean(grads, axis=(0))
+    #pooled_grads = grads[0] 
+   # gradcamweights=pooled_grads
+    #print(pooled_grads.shape)#use print to see intermediate outputs
+   # heatmap =last_conv_layer_output*gradcamweights
+    heatmap = np.multiply(last_conv_layer_output,pooled_grads)
+    #print(heatmap.shape)
+    heatmap = tf.reduce_mean(heatmap, axis=(1))
+    #print(heatmap.shape)
+    heatmap =relu(np.expand_dims(heatmap,0))
+    #print(heatmap.shape)#(this expandims is so that I have it as a 1,582,1array)
+    # For visualization purpose, we will also normalize the heatmap between 0 & 1
+    heatmap=(heatmap - np.min(heatmap)) / (np.max(heatmap) - np.min(heatmap))  
+    #print(heatmap.shape)
+    return heatmap
+  
+
+#model.layers[-1].activation = None
+
+%matplotlib inline
+for i in range(2620,2640):
+    example = Alldata[i]
+    exp = grad_cam("re_lu_1", np.expand_dims(example,axis=0), model)
+    plt.imshow(exp, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+           vmin=exp.min(), vmax=exp.max(), alpha=1.0)
+    plt.plot(example,'k')
+    pred = model.predict(np.expand_dims(example,axis=0))
+    plt.title('GradCAM\nPrediction: '+str(pred[0])+'\nLabel: '+str(y_data[i]))
+    plt.show()
+  
+
+##############################
+
+h460=Alldata[0:1320]
+avgh460=mean(h460,axis=0)
+gradcamh460=grad_cam("re_lu_1", np.expand_dims(avgh460,axis=0), model)
+plt.imshow(gradcamh460, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+       vmin=gradcamh460.min(), vmax=gradcamh460.max(), alpha=1.0)
+plt.plot(avgh460,'k')
+plt.title('avg GRAD CAM H460 cells')
+plt.show()
+
+h460rad=Alldata[1120:1320]
+avgh460rad=mean(h460rad,axis=0)
+gradcamh460rad=grad_cam("re_lu_1", np.expand_dims(avgh460rad,axis=0), model)
+plt.imshow(gradcamh460rad, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+       vmin=gradcamh460rad.min(), vmax=gradcamh460rad.max(), alpha=1.0)
+plt.plot(avgh460rad,'k')
+plt.title('avg GRAD CAM H460 cells, d3 and 8-50 Gy')
+plt.show()
+
+##############################
+
+
+mcf7=Alldata[1320:2641]
+avgmcf7=mean(mcf7,axis=0)
+gradcammcf7=grad_cam("re_lu_1", np.expand_dims(avgmcf7,axis=0), model)
+plt.imshow(gradcammcf7, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+       vmin=gradcammcf7.min(), vmax=gradcammcf7.max(), alpha=1.0)
+plt.plot(avgmcf7,'k')
+plt.title('avg GRAD CAM MCF7 cells')
+plt.show()
+
+mcf7rad=Alldata[2441:2641]
+avgmcf7rad=mean(mcf7rad,axis=0)
+gradcammcf7rad=grad_cam("re_lu_1", np.expand_dims(avgmcf7rad,axis=0), model)
+plt.imshow(gradcammcf7rad, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+       vmin=gradcammcf7rad.min(), vmax=gradcammcf7rad.max(), alpha=1.0)
+plt.plot(avgmcf7rad,'k')
+plt.title('avg GRAD CAM MCF7 cells, d3 and 8-50 Gy')
+plt.show()
+
+#################################3
+
+lncap=Alldata[2641:3960]
+avglncap=mean(lncap,axis=0)
+gradcamlncap=grad_cam("re_lu_1", np.expand_dims(avglncap,axis=0), model)
+plt.imshow(gradcamlncap, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+       vmin=gradcamlncap.min(), vmax=gradcamlncap.max(), alpha=1.0)
+plt.plot(avglncap,'k')
+plt.title('avg GRAD CAM LNCaP cells')
+plt.show()
+
+
+lncaprad=Alldata[3761:3960]
+avglncaprad=mean(lncaprad,axis=0)
+gradcamlncaprad=grad_cam("re_lu_1", np.expand_dims(avglncaprad,axis=0), model)
+plt.imshow(gradcamlncaprad, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+       vmin=gradcamlncaprad.min(), vmax=gradcamlncaprad.max(), alpha=1.0)
+plt.plot(avglncaprad,'k')
+plt.title('avg GRAD CAM LNCaP cells, d3 and 8-50 Gy')
+plt.show()
+
+#################################3
+
+mb231=Alldata[3960:4920]
+avgmb231=mean(mb231,axis=0)
+gradcammb231=grad_cam("re_lu_1", np.expand_dims(avgmb231,axis=0), model)
+plt.imshow(gradcammb231, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+       vmin=gradcammb231.min(), vmax=gradcammb231.max(), alpha=1.0)
+plt.plot(avgmb231,'k')
+plt.title('avg GRAD CAM MB231 cells')
+plt.show()
+
+
+mb231rad=Alldata[4760:4920]
+avgmb231rad=mean(mb231rad,axis=0)
+gradcammb231rad=grad_cam("re_lu_1", np.expand_dims(avgmb231rad,axis=0), model)
+plt.imshow(gradcammb231rad, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+       vmin=gradcammb231rad.min(), vmax=gradcammb231rad.max(), alpha=1.0)
+plt.plot(avgmb231rad,'k')
+plt.title('avg GRAD CAM MB231 cells, d3 and 8-50 Gy')
+plt.show()
+
+
+####################################
+H460maps=[]
+for i in range(0,1320):            #960,1080          #2040,2160 #3120,3240
+ H460maps.append(grad_cam("re_lu_1", np.expand_dims(Alldata[i],axis=0), model))
+
+H460maps=np.reshape(H460maps, (1320, exp.size))   
+avgH460map=sum(H460maps)/1320
+avgH460map=np.reshape(avgH460map, (1, exp.size)) 
+
+plt.imshow(avgH460map, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+       vmin=avgH460map.min(), vmax=avgH460map.max(), alpha=1.0)
+plt.plot(avgh460,'k')
+plt.title('avg GRAD CAM of H460 cells')
+plt.show()
+
+
+mcf7maps=[]
+for i in range(1320,2641):            #960,1080          #2040,2160 #3120,3240
+ mcf7maps.append(grad_cam("re_lu_1", np.expand_dims(Alldata[i],axis=0), model))
+
+mcf7maps=np.reshape(mcf7maps, (1321, exp.size))   
+avgmcf7map=sum(mcf7maps)/1321
+avgmcf7map=np.reshape(avgmcf7map, (1, exp.size)) 
+
+plt.imshow(avgmcf7map, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+       vmin=avgmcf7map.min(), vmax=avgmcf7map.max(), alpha=1.0)
+plt.plot(avgmcf7,'k')
+plt.title('avg GRAD CAM of MCF7 cells')
+plt.show()
+
+
+lncapmaps=[]
+for i in range(2641,3960):            #960,1080          #2040,2160 #3120,3240
+ lncapmaps.append(grad_cam("re_lu_1", np.expand_dims(Alldata[i],axis=0), model))
+
+lncapmaps=np.reshape(lncapmaps, (1319, exp.size))   
+avglncapmap=sum(lncapmaps)/1319
+avglncapmap=np.reshape(avglncapmap, (1, exp.size)) 
+plt.imshow(avglncapmap, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+       vmin=avglncapmap.min(), vmax=avglncapmap.max(), alpha=1.0)
+plt.plot(avglncap,'k')
+plt.title('avg GRAD CAM of LNCaP cells')
+plt.show()
+
+
+mb231maps=[]
+for i in range(3960,4920):            #960,1080          #2040,2160 #3120,3240
+ mb231maps.append(grad_cam("re_lu_1", np.expand_dims(Alldata[i],axis=0), model))
+
+mb231maps=np.reshape(mb231maps, (960, exp.size))   
+avgmb231map=sum(mb231maps)/960
+avgmb231map=np.reshape(avgmb231map, (1, exp.size)) 
+plt.imshow(avgmb231map, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+       vmin=avgmb231map.min(), vmax=avgmb231map.max(), alpha=1.0)
+plt.plot(avgmb231,'k')
+plt.title('avg GRAD CAM of MDAMB231 cells')
+plt.show()
+
+
+
+
+
+#first concatenate my maps 
+Mbig=np.concatenate((H460maps,mcf7maps,lncapmaps,mb231maps), axis=0)
+Mbig = pd.DataFrame (Mbig)
+
+
+
+avgmaps=np.concatenate((gradcamh460,gradcamh460rad,gradcammcf7,gradcammcf7rad,gradcamlncap,gradcamlncaprad,gradcammb231,gradcammb231rad),axis=0)
+avgmaps = pd.DataFrame (avgmaps)
+
+#Mbig.to_excel("gradcam4Cellsz_label2_64-128-8x1_2-3-1300.xlsx", index=False,header=False)
+#avgmaps.to_excel("AVGgradcam4Cellsz_label2_64-128-8x1_2-3-1300.xlsx", index=False,header=False)
+
+
+#Mbig.to_excel("gradcam4Cellsz_label2_64-64-6x1_3-2-2700.xlsx", index=False,header=False)
+#avgmaps.to_excel("AVGgradcam4Cellsz_label2_64-64-6x1_3-2-2700.xlsx", index=False,header=False)
+
+
+#Mbig.to_excel("gradcam4Cellsz_label3_64-64-6x1_2700.xlsx", index=False,header=False)
+#avgmaps.to_excel("AVGgradcam4Cellsz_label3_64-64-6x1_2700.xlsx", index=False,header=False)
+
+
+
+seedy=str(seedy)
+Mbig.to_excel('doubcheckgradcam4Cellsz_label2_64-64-6x1_3-2'+(seedy)+'.xlsx', index=False,header=False)
+avgmaps.to_excel('doubcheckgradcam4Cellsz_label2_32-64_8x1_2-3'+(seedy)+'.xlsx', index=False,header=False)
+
+#spectra
+#Alldata[1079]
+#avgh4600Gy
+#avgh46010Gy
+#Alldata[1726]
+#avgmcf70Gy
+#avgmcf710Gy
+#avgmcf730Gy
+#avgLNCaP0Gy
+#avgLNCaP10Gy
+#average gradcam mcf7 30,50Gy day3 
+
+
+
+
+
+
+#import keras.backend as K
+
+func = K.function([model.input], model.get_layer('re_lu_1').output)
+
+Hconv_out10 = func([np.expand_dims(Alldata[1079],axis=0)])
+Cconv_out10 = func([np.expand_dims(avgmcf710Gy,axis=0)])
+Lconv_out10 = func([np.expand_dims(avgLNCaP10Gy,axis=0)])
+
+r=gradientz("re_lu_1", np.expand_dims(avgmcf710Gy,axis=0), model)
+w=gradientz("re_lu_1", np.expand_dims(avgLNCaP10Gy,axis=0), model)
+h=gradientz("re_lu_1", np.expand_dims(Alldata[1079],axis=0), model)
+#Hconv_output = func([np.expand_dims(avgh460,axis=0)])
+#Cconv_output = func([np.expand_dims(avgmcf7,axis=0)])
+#Lconv_output = func([np.expand_dims(avglncap,axis=0)])
+
+
+
+
+
+
+avgmaps= pd.read_excel(r'C:\Users\Alejandra Fuentes\OneDrive - The University Of British Columbia\New folder\gettingtiredofthis\heatmapgradcampaper.xlsx',header=None,sheet_name='individualsample')  
+avgmaps=avgmaps.to_numpy()
+
+xaxis= pd.read_csv(r'C:\Users\Alejandra Fuentes\OneDrive - The University Of British Columbia\thirdyear\PLOSone2015-AllspectraXaxis.csv',header=None)
+xaxis=xaxis.to_numpy()
+
+
+
+xaxis=xaxis[0]
+
+stepsize=97
+
+
+
+
+avgmaph460d1n0Gy=avgmaps[0]
+avgmaph460d1n0Gy=np.reshape(avgmaph460d1n0Gy, (1, stepsize)) 
+avgmaph460d1n0Gy=(avgmaph460d1n0Gy - np.min(avgmaph460d1n0Gy)) / (np.max(avgmaph460d1n0Gy) - np.min(avgmaph460d1n0Gy))
+
+avgmaph460d3n10Gy=avgmaps[1]
+avgmaph460d3n10Gy=np.reshape(avgmaph460d3n10Gy, (1, stepsize)) 
+avgmaph460d3n10Gy=(avgmaph460d3n10Gy - np.min(avgmaph460d3n10Gy)) / (np.max(avgmaph460d3n10Gy) - np.min(avgmaph460d3n10Gy))
+
+
+
+
+
+avgmapmcf7d1n0Gy=avgmaps[2]
+avgmapmcf7d1n0Gy=np.reshape(avgmapmcf7d1n0Gy, (1, stepsize)) 
+avgmapmcf7d1n0Gy=(avgmapmcf7d1n0Gy - np.min(avgmapmcf7d1n0Gy)) / (np.max(avgmapmcf7d1n0Gy) - np.min(avgmapmcf7d1n0Gy))
+
+avgmapmcf7d3n10Gy=avgmaps[3]
+avgmapmcf7d3n10Gy=np.reshape(avgmapmcf7d3n10Gy, (1, stepsize)) 
+avgmapmcf7d3n10Gy=(avgmapmcf7d3n10Gy - np.min(avgmapmcf7d3n10Gy)) / (np.max(avgmapmcf7d3n10Gy) - np.min(avgmapmcf7d3n10Gy))
+
+avgmapmcf7d3n30Gy=avgmaps[4]
+avgmapmcf7d3n30Gy=np.reshape(avgmapmcf7d3n30Gy, (1, stepsize)) 
+avgmapmcf7d3n30Gy=(avgmapmcf7d3n30Gy - np.min(avgmapmcf7d3n30Gy)) / (np.max(avgmapmcf7d3n30Gy) - np.min(avgmapmcf7d3n30Gy))
+
+
+
+
+avgmaplncapd1n0Gy=avgmaps[5]
+avgmaplncapd1n0Gy=np.reshape(avgmaplncapd1n0Gy, (1, stepsize)) 
+avgmaplncapd1n0Gy=(avgmaplncapd1n0Gy - np.min(avgmaplncapd1n0Gy)) / (np.max(avgmaplncapd1n0Gy) - np.min(avgmaplncapd1n0Gy))
+
+avgmaplncapd3n10Gy=avgmaps[6]
+avgmaplncapd3n10Gy=np.reshape(avgmaplncapd3n10Gy, (1, stepsize)) 
+avgmaplncapd3n10Gy=(avgmaplncapd3n10Gy - np.min(avgmaplncapd3n10Gy)) / (np.max(avgmaplncapd3n10Gy) - np.min(avgmaplncapd3n10Gy))
+
+
+
+
+avgmapAllH460=avgmaps[7]
+avgmapAllH460=np.reshape(avgmapAllH460, (1, stepsize)) 
+avgmapAllH460=(avgmapAllH460 - np.min(avgmapAllH460)) / (np.max(avgmapAllH460) - np.min(avgmapAllH460))
+
+
+avgmapAllMCF7=avgmaps[8]
+avgmapAllMCF7=np.reshape(avgmapAllMCF7, (1, stepsize)) 
+avgmapAllMCF7=(avgmapAllMCF7 - np.min(avgmapAllMCF7)) / (np.max(avgmapAllMCF7) - np.min(avgmapAllMCF7))
+
+
+
+avgmapAlllncap=avgmaps[9]
+avgmapAlllncap=np.reshape(avgmapAlllncap, (1, stepsize)) 
+avgmapAlllncap=(avgmapAlllncap - np.min(avgmapAlllncap)) / (np.max(avgmapAlllncap) - np.min(avgmapAlllncap))
+
+
+
+fig, ax = plt.subplots()
+ax.set_xticks([0, 58, 138,220, 306,394,486,582])
+ax.set_xticklabels([r'450', r'600', r'800', r'1000', r'1200',r'1400',r'1600',r'1800']) #tex code
+fig, ax = plt.subplots()
+ax.set_xticks([0, 58, 138,220, 306,394,486,582])
+ax.set_xticklabels([r'450', r'600', r'800', r'1000', r'1200',r'1400',r'1600',r'1800']) #tex code
+plt.imshow(avgmaph460d1n0Gy, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+vmin=avgmaph460d1n0Gy.min(), vmax=avgmaph460d1n0Gy.max(), alpha=1.0)
+plt.plot(avgh4600Gy,'k')
+plt.title('Avg GradCAM of H460 cells: day 1,0 Gy')
+
+
+
+fig, ax = plt.subplots()
+ax.set_xticks([0, 58, 138,220, 306,394,486,582])
+ax.set_xticklabels([r'450', r'600', r'800', r'1000', r'1200',r'1400',r'1600',r'1800']) #tex code
+plt.imshow(avgmaph460d3n10Gy, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+vmin=avgmaph460d3n10Gy.min(), vmax=avgmaph460d3n10Gy.max(), alpha=1.0)
+plt.plot(avgh46010Gy,'k')
+plt.title('Avg GradCAM of H460 cells: day 3, 6-10 Gy')
+
+
+
+
+
+
+
+fig, ax = plt.subplots()
+ax.set_xticks([0, 58, 138,220, 306,394,486,582])
+ax.set_xticklabels([r'450', r'600', r'800', r'1000', r'1200',r'1400',r'1600',r'1800']) #tex code
+plt.imshow(avgmapmcf7d1n0Gy, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+vmin=avgmapmcf7d1n0Gy.min(), vmax=avgmapmcf7d1n0Gy.max(), alpha=1.0)
+plt.plot(avgmcf70Gy,'k')
+plt.title('Avg GradCAM of MCF7 cells: day 1, 0 Gy')
+
+
+
+fig, ax = plt.subplots()
+ax.set_xticks([0, 58, 138,220, 306,394,486,582])
+ax.set_xticklabels([r'450', r'600', r'800', r'1000', r'1200',r'1400',r'1600',r'1800']) #tex code
+plt.imshow(avgmapmcf7d3n10Gy, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+vmin=avgmapmcf7d3n10Gy.min(), vmax=avgmapmcf7d3n10Gy.max(), alpha=1.0)
+plt.plot(avgmcf710Gy,'k')
+plt.title('Avg GradCAM of MCF7 cells: day 3, 6-10 Gy')
+
+
+fig, ax = plt.subplots()
+ax.set_xticks([0, 58, 138,220, 306,394,486,582])
+ax.set_xticklabels([r'450', r'600', r'800', r'1000', r'1200',r'1400',r'1600',r'1800']) #tex code
+plt.imshow(avgmapmcf7d3n30Gy, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+vmin=avgmapmcf7d3n30Gy.min(), vmax=avgmapmcf7d3n30Gy.max(), alpha=1.0)
+plt.plot(avgmcf730Gy,'k')
+plt.title('Avg GradCAM of MCF7 cells: day 3, 30-50 Gy')
+
+
+
+
+
+
+fig, ax = plt.subplots()
+ax.set_xticks([0, 58, 138,220, 306,394,486,582])
+ax.set_xticklabels([r'450', r'600', r'800', r'1000', r'1200',r'1400',r'1600',r'1800']) #tex code
+plt.imshow(avgmaplncapd1n0Gy, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+vmin=avgmaplncapd1n0Gy.min(), vmax=avgmaplncapd1n0Gy.max(), alpha=1.0)
+plt.plot(avgLNCaP0Gy,'k')
+plt.title('Avg GradCAM of LNCaP cells: day 1, 0 Gy')
+
+fig, ax = plt.subplots()
+ax.set_xticks([0, 58, 138,220, 306,394,486,582])
+ax.set_xticklabels([r'450', r'600', r'800', r'1000', r'1200',r'1400',r'1600',r'1800']) #tex code
+plt.imshow(avgmaplncapd3n10Gy, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+vmin=avgmaplncapd3n10Gy.min(), vmax=avgmaplncapd3n10Gy.max(), alpha=1.0)
+plt.plot(avgLNCaP10Gy,'k')
+plt.title('Avg GradCAM of LNCaP cells: day 3, 6-10 Gy')
+
+
+
+
+
+
+
+
+fig, ax = plt.subplots()
+ax.set_xticks([0, 58, 138,220, 306,394,486,582])
+ax.set_xticklabels([r'450', r'600', r'800', r'1000', r'1200',r'1400',r'1600',r'1800']) #tex code
+plt.imshow(avgmapAllH460, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+vmin=avgmapAllH460.min(), vmax=avgmapAllH460.max(), alpha=1.0)
+plt.plot(avgh460,'k')
+plt.title('Avg GradCAM of All H460 cells')
+
+fig, ax = plt.subplots()
+ax.set_xticks([0, 58, 138,220, 306,394,486,582])
+ax.set_xticklabels([r'450', r'600', r'800', r'1000', r'1200',r'1400',r'1600',r'1800']) #tex code
+plt.imshow(avgmapAllMCF7, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+vmin=avgmapAllMCF7.min(), vmax=avgmapAllMCF7.max(), alpha=1.0)
+plt.plot(avgmcf7,'k')
+plt.title('Avg GradCAM of All MCF7 cells')
+
+fig, ax = plt.subplots()
+ax.set_xticks([0, 58, 138,220, 306,394,486,582])
+ax.set_xticklabels([r'450', r'600', r'800', r'1000', r'1200',r'1400',r'1600',r'1800']) #tex code
+plt.imshow(avgmapAlllncap, cmap='jet', aspect="auto", interpolation='bilinear',extent=[0,582,-1.5,5],
+vmin=avgmapAlllncap.min(), vmax=avgmapAlllncap.max(), alpha=1.0)
+plt.plot(avglncap,'k')
+plt.title('Avg GradCAM of All LNCaP cells')
+
+
